@@ -218,7 +218,7 @@ CLASS ZCL_ZOV_ALINE_DPC_EXT IMPLEMENTATION.
 
 
   METHOD ovcabset_get_entityset.
-   data: lt_cab       type standard table of zovcab_aline.
+    DATA: lt_cab       TYPE STANDARD TABLE OF zovcab_aline.
     DATA: ls_cab       TYPE zovcab_aline.
     DATA: ls_entityset LIKE LINE OF et_entityset.
 

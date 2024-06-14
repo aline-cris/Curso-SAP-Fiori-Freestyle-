@@ -150,21 +150,58 @@ CLASS ZCL_ZOV_ALINE_DPC_EXT IMPLEMENTATION.
   ENDMETHOD.
 
 
-  method OVCABSET_DELETE_ENTITY.
-**TRY.
-*CALL METHOD SUPER->OVCABSET_DELETE_ENTITY
-*  EXPORTING
-*    IV_ENTITY_NAME          =
-*    IV_ENTITY_SET_NAME      =
-*    IV_SOURCE_NAME          =
-*    IT_KEY_TAB              =
-**    io_tech_request_context =
-*    IT_NAVIGATION_PATH      =
-*    .
-**  CATCH /iwbep/cx_mgw_busi_exception.
-**  CATCH /iwbep/cx_mgw_tech_exception.
-**ENDTRY.
-  endmethod.
+  METHOD ovcabset_delete_entity.
+    DATA: ls_key_tab LIKE LINE OF it_key_tab.
+
+    DATA(lo_msg) = me->/iwbep/if_mgw_conv_srv_runtime~get_message_container( ).
+
+    READ TABLE it_key_tab INTO ls_key_tab WITH KEY name = 'OrdemId'.
+    IF sy-subrc <> 0.
+      lo_msg->add_message_text_only(
+        EXPORTING
+          iv_msg_type = 'E'
+          iv_msg_text = 'OrdemId não informado'
+      ).
+
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message_container = lo_msg.
+    ENDIF.
+
+    DELETE FROM zovitem_aline WHERE ordemid = ls_key_tab-value.
+    " Vinicius 28/04/2024 - Comentando validação pois algumas ordens podem
+    " não tem itens
+*  IF sy-subrc <> 0.
+*    ROLLBACK WORK.
+*
+*    lo_msg->add_message_text_only(
+*      EXPORTING
+*        iv_msg_type = 'E'
+*        iv_msg_text = 'Erro ao remover itens'
+*    ).
+*
+*    RAISE EXCEPTION type /iwbep/cx_mgw_busi_exception
+*      EXPORTING
+*        message_container = lo_msg.
+*  ENDIF.
+
+    DELETE FROM zovcab_aline WHERE ordemid = ls_key_tab-value.
+    IF sy-subrc <> 0.
+      ROLLBACK WORK.
+
+      lo_msg->add_message_text_only(
+        EXPORTING
+          iv_msg_type = 'E'
+          iv_msg_text = 'Erro ao remover ordem'
+      ).
+
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message_container = lo_msg.
+    ENDIF.
+
+    COMMIT WORK AND WAIT.
+  ENDMETHOD.
 
 
   METHOD ovcabset_get_entity.
@@ -268,24 +305,67 @@ CLASS ZCL_ZOV_ALINE_DPC_EXT IMPLEMENTATION.
   ENDMETHOD.
 
 
-  method OVCABSET_UPDATE_ENTITY.
-**TRY.
-*CALL METHOD SUPER->OVCABSET_UPDATE_ENTITY
-*  EXPORTING
-*    IV_ENTITY_NAME          =
-*    IV_ENTITY_SET_NAME      =
-*    IV_SOURCE_NAME          =
-*    IT_KEY_TAB              =
-**    io_tech_request_context =
-*    IT_NAVIGATION_PATH      =
-**    io_data_provider        =
-**  IMPORTING
-**    er_entity               =
-*    .
-**  CATCH /iwbep/cx_mgw_busi_exception.
-**  CATCH /iwbep/cx_mgw_tech_exception.
-**ENDTRY.
-  endmethod.
+  METHOD ovcabset_update_entity.
+    DATA: ld_error TYPE flag.
+
+    DATA(lo_msg) = me->/iwbep/if_mgw_conv_srv_runtime~get_message_container( ).
+
+    io_data_provider->read_entry_data(
+      IMPORTING
+        es_data = er_entity
+    ).
+
+    er_entity-ordemid = it_key_tab[ name = 'OrdemId' ]-value.
+
+    " validações
+    IF er_entity-clienteid = 0.
+      ld_error = 'X'.
+      lo_msg->add_message_text_only(
+        EXPORTING
+          iv_msg_type = 'E'
+          iv_msg_text = 'Cliente vazio'
+      ).
+    ENDIF.
+
+    IF er_entity-totalordem < 10.
+      ld_error = 'X'.
+      lo_msg->add_message(
+        EXPORTING
+          iv_msg_type   = 'E'
+          iv_msg_id     = 'ZOV'
+          iv_msg_number = 1
+          iv_msg_v1     = 'R$ 10,00'
+          iv_msg_v2     = |{ er_entity-ordemid }|
+      ).
+    ENDIF.
+
+    IF ld_error = 'X'.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message_container = lo_msg
+          http_status_code  = 500.
+    ENDIF.
+
+    UPDATE zovcab_aline
+       SET clienteid  = er_entity-clienteid
+           totalitens = er_entity-totalitens
+           totalfrete = er_entity-totalfrete
+           totalordem = er_entity-totalordem
+           status     = er_entity-status
+     WHERE ordemid    = er_entity-ordemid.
+
+    IF sy-subrc <> 0.
+      lo_msg->add_message_text_only(
+        EXPORTING
+          iv_msg_type = 'E'
+          iv_msg_text = 'Erro ao atualizar ordem'
+      ).
+
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message_container = lo_msg.
+    ENDIF.
+  ENDMETHOD.
 
 
   METHOD ovitemset_create_entity.
@@ -324,21 +404,30 @@ CLASS ZCL_ZOV_ALINE_DPC_EXT IMPLEMENTATION.
   ENDMETHOD.
 
 
-  method OVITEMSET_DELETE_ENTITY.
-**TRY.
-*CALL METHOD SUPER->OVITEMSET_DELETE_ENTITY
-*  EXPORTING
-*    IV_ENTITY_NAME          =
-*    IV_ENTITY_SET_NAME      =
-*    IV_SOURCE_NAME          =
-*    IT_KEY_TAB              =
-**    io_tech_request_context =
-*    IT_NAVIGATION_PATH      =
-*    .
-**  CATCH /iwbep/cx_mgw_busi_exception.
-**  CATCH /iwbep/cx_mgw_tech_exception.
-**ENDTRY.
-  endmethod.
+  METHOD ovitemset_delete_entity.
+    DATA: ls_item    TYPE zovitem.
+    DATA: ls_key_tab LIKE LINE OF it_key_tab.
+
+    DATA(lo_msg) = me->/iwbep/if_mgw_conv_srv_runtime~get_message_container( ).
+
+    ls_item-ordemid = it_key_tab[ name = 'OrdemId' ]-value.
+    ls_item-itemid  = it_key_tab[ name = 'ItemId' ]-value.
+
+    DELETE FROM zovitem_aline
+     WHERE ordemid = ls_item-ordemid
+       AND itemid  = ls_item-itemid.
+    IF sy-subrc <> 0.
+      lo_msg->add_message_text_only(
+        EXPORTING
+          iv_msg_type = 'E'
+          iv_msg_text = 'Erro ao remover item'
+      ).
+
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message_container = lo_msg.
+    ENDIF.
+  ENDMETHOD.
 
 
   METHOD ovitemset_get_entity.
@@ -475,22 +564,37 @@ CLASS ZCL_ZOV_ALINE_DPC_EXT IMPLEMENTATION.
     ENDMETHOD.
 
 
-  method OVITEMSET_UPDATE_ENTITY.
-**TRY.
-*CALL METHOD SUPER->OVITEMSET_UPDATE_ENTITY
-*  EXPORTING
-*    IV_ENTITY_NAME          =
-*    IV_ENTITY_SET_NAME      =
-*    IV_SOURCE_NAME          =
-*    IT_KEY_TAB              =
-**    io_tech_request_context =
-*    IT_NAVIGATION_PATH      =
-**    io_data_provider        =
-**  IMPORTING
-**    er_entity               =
-*    .
-**  CATCH /iwbep/cx_mgw_busi_exception.
-**  CATCH /iwbep/cx_mgw_tech_exception.
-**ENDTRY.
-  endmethod.
+  METHOD ovitemset_update_entity.
+    DATA(lo_msg) = me->/iwbep/if_mgw_conv_srv_runtime~get_message_container( ).
+
+    io_data_provider->read_entry_data(
+      IMPORTING
+        es_data = er_entity
+    ).
+
+    er_entity-ordemid  = it_key_tab[ name = 'OrdemId' ]-value.
+    er_entity-itemid   = it_key_tab[ name = 'ItemId' ]-value.
+    er_entity-precotot = er_entity-quantidade * er_entity-precouni.
+
+    UPDATE zovitem_aline
+       SET material   = er_entity-material
+           descricao  = er_entity-descricao
+           quantidade = er_entity-quantidade
+           precouni   = er_entity-precouni
+           precotot   = er_entity-precotot
+     WHERE ordemid    = er_entity-ordemid
+       AND itemid     = er_entity-itemid.
+
+    IF sy-subrc <> 0.
+      lo_msg->add_message_text_only(
+        EXPORTING
+          iv_msg_type = 'E'
+          iv_msg_text = 'Erro ao atualizar item'
+      ).
+
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message_container = lo_msg.
+    ENDIF.
+  ENDMETHOD.
 ENDCLASS.

@@ -7,6 +7,8 @@ public section.
 
   methods /IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_DEEP_ENTITY
     redefinition .
+  methods /IWBEP/IF_MGW_APPL_SRV_RUNTIME~EXECUTE_ACTION
+    redefinition .
 protected section.
 
   methods MENSAGEMSET_CREATE_ENTITY
@@ -735,5 +737,40 @@ CLASS ZCL_ZOV_ALINE_DPC_EXT IMPLEMENTATION.
         is_data = ls_deep_entity
       CHANGING
         cr_data = er_deep_entity.
+  ENDMETHOD.
+
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~execute_action.
+    DATA: ld_ordemid  TYPE zovcab_ALINE-ordemid.
+    DATA: ld_status   TYPE zovcab_ALINE-status.
+    DATA: lt_bapiret2 TYPE STANDARD TABLE OF zcl_zov_ALINE_mpc_ext=>TS_mensagem.
+    DATA: ls_bapiret2 TYPE zcl_zov_ALINE_mpc_ext=>TS_mensagem.
+
+    IF iv_action_name = 'ZFI_ATUALIZA_STATUS'.
+      ld_ordemid = it_parameter[ name = 'ID_ORDEMID' ]-value.
+      ld_status  = it_parameter[ name = 'ID_STATUS' ]-value.
+
+      UPDATE zovcab_ALINE
+         SET status = ld_status
+       WHERE ordemid = ld_ordemid.
+
+      IF sy-subrc = 0.
+        CLEAR ls_bapiret2.
+        ls_bapiret2-type     = 'S'.
+        ls_bapiret2-meSsage = |Status da ordem { ld_ordemid } atualizado|.
+        APPEND ls_bapiret2 TO lt_bapiret2.
+      ELSE.
+        CLEAR ls_bapiret2.
+        ls_bapiret2-type     = 'E'.
+        ls_bapiret2-meSsage = |Erro ao atualizar status da ordem { ld_ordemid }|.
+        APPEND ls_bapiret2 TO lt_bapiret2.
+      ENDIF.
+    ENDIF.
+
+    CALL METHOD me->copy_data_to_ref
+      EXPORTING
+        is_data = lt_bapiret2
+      CHANGING
+        cr_data = er_data.
   ENDMETHOD.
 ENDCLASS.
